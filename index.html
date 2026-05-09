@@ -1,0 +1,408 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="description" content="VideoSlim - 基於 FFmpeg WebAssembly 的在地影片壓縮工具，保留完整 Metadata。">
+<meta name="theme-color" content="#F6F6F6">
+<title>VideoSlim — 在地影片壓縮 (Metadata 完美保留版)</title>
+
+<!-- 神奇小藥丸：解決 GitHub Pages 缺少 COOP/COEP 標頭導致 FFmpeg 核心載入失敗的問題 -->
+<script src="https://cdn.jsdelivr.net/npm/coi-serviceworker@0.1.6/coi-serviceworker.min.js"></script>
+
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Noto+Sans+TC:wght@300;400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F6F6F6; --surface: #FFFFFF; --surface2: #F3F4F6; --border: #D1D5DB;
+    --accent: #0284C7; --accent2: #7C3AED; --accent3: #059669; --warn: #D97706; --danger: #DC2626;
+    --text: #111827; --text2: #4B5563; --text3: #6B7280;
+    --mono: 'Space Mono', monospace; --sans: 'Noto Sans TC', sans-serif; --display: 'Bebas Neue', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; overflow-x: hidden; position: relative; -webkit-font-smoothing: antialiased; }
+  
+  body::before { content: ''; position: fixed; inset: 0; background-image: linear-gradient(rgba(2,132,199,.05) 1px, transparent 1px), linear-gradient(90deg, rgba(2,132,199,.05) 1px, transparent 1px); background-size: 40px 40px; pointer-events: none; z-index: 0; }
+  .glow-bg { position: fixed; top: -200px; left: 50%; transform: translateX(-50%); width: 800px; height: 600px; background: radial-gradient(ellipse, rgba(2,132,199,.08) 0%, transparent 70%); pointer-events: none; z-index: 0; }
+  .container { max-width: 900px; margin: 0 auto; padding: 0 20px 80px; position: relative; z-index: 1; }
+
+  #installBtn { display: none; position: absolute; top: 20px; right: 20px; background: var(--surface); border: 1px solid var(--border); padding: 8px 16px; border-radius: 20px; font-size: 13px; font-weight: bold; color: var(--accent); cursor: pointer; box-shadow: 0 4px 6px rgba(0,0,0,0.05); transition: all 0.3s ease; }
+  #installBtn:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+  header { padding: 50px 0 20px; text-align: center; }
+  .logo { font-family: var(--display); font-size: clamp(52px, 10vw, 88px); letter-spacing: 4px; line-height: 1; background: linear-gradient(135deg, var(--accent) 0%, #111827 50%, var(--accent2) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; margin-bottom: 8px; animation: shimmer 5s ease infinite; background-size: 200%; }
+  @keyframes shimmer { 0% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } 100% { background-position: 0% 50%; } }
+  .tagline { font-family: var(--mono); font-size: 11px; color: var(--text2); letter-spacing: 2px; text-transform: uppercase; }
+
+  .badge-row { display: flex; justify-content: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+  .badge { font-family: var(--mono); font-size: 10px; padding: 4px 10px; border-radius: 4px; border: 1px solid; letter-spacing: 1px; font-weight: bold; }
+  .badge.cyan { border-color: var(--accent); color: var(--accent); background: rgba(2, 132, 199, .06); }
+  .badge.purple { border-color: var(--accent2); color: var(--accent2); background: rgba(124, 58, 237, .06); }
+  .badge.green { border-color: var(--accent3); color: var(--accent3); background: rgba(5, 150, 105, .06); }
+
+  .drop-zone { margin: 32px 0 24px; border: 2px dashed var(--border); border-radius: 12px; padding: 48px 24px; text-align: center; cursor: pointer; transition: all .3s ease; background: var(--surface); position: relative; overflow: hidden; }
+  .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: rgba(2, 132, 199, .03); }
+  .drop-icon { width: 64px; height: 64px; margin: 0 auto 16px; }
+  .drop-icon svg { width: 100%; height: 100%; stroke: var(--accent); transition: all .3s; }
+  .drop-zone:hover .drop-icon svg { transform: translateY(-4px); }
+  .drop-title { font-size: 18px; font-weight: bold; margin-bottom: 6px; color: var(--text); }
+  .drop-sub { font-size: 13px; color: var(--text2); font-family: var(--mono); }
+  .drop-sub span { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  #fileInput { display: none; }
+
+  .section-label { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; color: var(--text3); margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+  .section-label::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+  
+  .mode-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 24px; }
+  .mode-card { border: 1px solid var(--border); border-radius: 8px; padding: 16px 14px; cursor: pointer; transition: all .25s; background: var(--surface); position: relative; }
+  .mode-card::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent); transform: scaleX(0); transition: transform .25s; }
+  .mode-card:hover { border-color: var(--accent); box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+  .mode-card.active { border-color: var(--accent); background: rgba(2, 132, 199, .03); }
+  .mode-card.active::before { transform: scaleX(1); }
+  
+  .mode-icon { font-size: 24px; margin-bottom: 8px; }
+  .mode-name { font-weight: bold; font-size: 14px; margin-bottom: 4px; }
+  .mode-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+  .queue { display: flex; flex-direction: column; gap: 10px; margin-bottom: 24px; }
+  .queue-item { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; position: relative; }
+  .file-icon { width: 36px; height: 36px; border-radius: 6px; background: var(--surface2); border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+  .file-info { flex: 1; min-width: 0; }
+  .file-name { font-size: 14px; font-weight: bold; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-meta { font-family: var(--mono); font-size: 11px; color: var(--text2); display: flex; gap: 12px; margin-top: 4px; }
+  .progress-bar-wrap { width: 100%; height: 4px; background: var(--surface2); border-radius: 2px; margin-top: 8px; overflow: hidden; }
+  .progress-bar { height: 100%; background: var(--accent); width: 0%; transition: width 0.3s; }
+  
+  .status-badge { font-family: var(--mono); font-size: 11px; padding: 4px 8px; border-radius: 4px; font-weight: bold; }
+  .status-badge.waiting { background: var(--surface2); color: var(--text2); }
+  .status-badge.processing { background: rgba(2,132,199,.1); color: var(--accent); }
+  .status-badge.done { background: rgba(5,150,105,.1); color: var(--accent3); }
+  .status-badge.error { background: rgba(220,38,38,.1); color: var(--danger); }
+  
+  .remove-btn { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; transition: color 0.2s; }
+  .remove-btn:hover { color: var(--danger); }
+  .dl-btn { background: var(--accent3); color: #fff; padding: 4px 10px; border-radius: 4px; font-size: 11px; text-decoration: none; font-family: var(--mono); margin-top: 8px; display: inline-block; cursor: pointer; border:none; }
+
+  .btn-start {
+    width: 100%; padding: 16px; font-family: var(--display); font-size: 24px; letter-spacing: 4px;
+    background: linear-gradient(135deg, var(--accent) 0%, #0369A1 100%); color: #FFF;
+    border: none; border-radius: 8px; cursor: pointer; transition: all .3s; margin-bottom: 24px;
+    box-shadow: 0 4px 12px rgba(2,132,199,0.3);
+  }
+  .btn-start:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(2,132,199,0.4); }
+  .btn-start:disabled { background: var(--border); color: var(--text3); cursor: not-allowed; box-shadow: none; transform: none; }
+
+  .stats-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 32px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; text-align: center; }
+  .stat-val { font-family: var(--display); font-size: 32px; color: var(--accent); }
+  .stat-label { font-family: var(--mono); font-size: 10px; color: var(--text3); }
+
+  @media (max-width: 600px) { .mode-grid { grid-template-columns: 1fr; } header { padding-top: 60px; } }
+</style>
+</head>
+<body>
+<div class="glow-bg"></div>
+
+<div class="container">
+  <button id="installBtn">📲 安裝至桌面</button>
+
+  <header>
+    <div class="logo">VIDEOSLIM</div>
+    <div class="tagline">WASM FFmpeg 核心 · 100% 完美保留 Metadata</div>
+    <div class="badge-row">
+      <span class="badge cyan">📍 保留 GPS</span>
+      <span class="badge purple">⏱ 保留時間戳</span>
+      <span class="badge green">🔒 本機運算</span>
+    </div>
+  </header>
+
+  <div class="stats-row">
+    <div class="stat-card"><div class="stat-val" id="statFiles">0</div><div class="stat-label">已處理檔案</div></div>
+    <div class="stat-card"><div class="stat-val" id="statSaved">0%</div><div class="stat-label">平均節省空間</div></div>
+    <div class="stat-card"><div class="stat-val" id="statSize">0 MB</div><div class="stat-label">共節省大小</div></div>
+  </div>
+
+  <div class="drop-zone" id="dropZone" tabindex="0">
+    <div class="drop-icon">
+      <svg fill="none" stroke-width="2" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10l4.553-2.069A1 1 0 0121 8.82V15.18a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+    </div>
+    <div class="drop-title">拖曳影片至此，或 <span id="triggerFile">點擊選取</span></div>
+    <div class="drop-sub" style="margin-top:6px">支援 MP4 · MOV · 處理完畢將保留所有相機與位置資訊</div>
+    <input type="file" id="fileInput" accept="video/*" multiple>
+  </div>
+
+  <div class="section-label">真實轉檔模式 (CRF)</div>
+  <div class="mode-grid">
+    <div class="mode-card speed active" data-mode="35">
+      <div class="mode-icon">⚡</div>
+      <div class="mode-name">極致壓縮</div>
+      <div class="mode-desc">最大化壓縮比，適合通訊軟體傳送 (CRF 35)</div>
+    </div>
+    <div class="mode-card balance" data-mode="28">
+      <div class="mode-icon">⚖️</div>
+      <div class="mode-name">標準平衡</div>
+      <div class="mode-desc">肉眼看不出畫質損失，縮小體積 (CRF 28)</div>
+    </div>
+    <div class="mode-card quality" data-mode="20">
+      <div class="mode-icon">💎</div>
+      <div class="mode-name">高畫質</div>
+      <div class="mode-desc">保留高畫質，僅清理冗餘數據 (CRF 20)</div>
+    </div>
+  </div>
+
+  <div class="queue" id="queue"></div>
+  <button class="btn-start" id="startBtn" disabled>載入核心中...</button>
+</div>
+
+<script type="module">
+import { FFmpeg } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js';
+import { fetchFile } from 'https://cdn.jsdelivr.net/npm/@ffmpeg/util@0.12.1/dist/esm/index.js';
+
+// ── PWA & Service Worker 註冊 ──
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    // 若 coi-serviceworker 已生效，這裡的註冊依然可以輔助離線資源快取
+    navigator.serviceWorker.register('./sw.js').catch(()=>console.log('SW Registration skipped.'));
+  });
+}
+
+let deferredPrompt;
+const installBtn = document.getElementById('installBtn');
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault(); deferredPrompt = e; installBtn.style.display = 'block';
+});
+installBtn.addEventListener('click', async () => {
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') installBtn.style.display = 'none';
+    deferredPrompt = null;
+  }
+});
+
+// ── 狀態管理 ──
+const state = {
+  files: new Map(),
+  mode: '35',
+  processing: false,
+  stats: { processed: 0, totalSaved: 0, totalOrig: 0 },
+  ffmpeg: null,
+  ffmpegReady: false
+};
+
+const DOM = {
+  dropZone: document.getElementById('dropZone'), fileInput: document.getElementById('fileInput'),
+  triggerFile: document.getElementById('triggerFile'), queue: document.getElementById('queue'),
+  startBtn: document.getElementById('startBtn'), statsFiles: document.getElementById('statFiles'),
+  statsSaved: document.getElementById('statSaved'), statsSize: document.getElementById('statSize')
+};
+
+// ── 載入 FFmpeg WebAssembly (CDN 優化與錯誤捕捉版) ──
+async function initFFmpeg() {
+  if (state.ffmpegReady) return;
+  try {
+    const ffmpeg = new FFmpeg();
+    const baseURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/esm';
+    
+    await ffmpeg.load({
+      coreURL: `${baseURL}/ffmpeg-core.js`,
+      wasmURL: `${baseURL}/ffmpeg-core.wasm`
+    });
+    
+    state.ffmpeg = ffmpeg;
+    state.ffmpegReady = true;
+    updateStartBtn();
+  } catch (e) {
+    console.error("FFmpeg 載入失敗:", e);
+    DOM.startBtn.textContent = `載入失敗: ${e.message || '請檢查網路連線'}`;
+    DOM.startBtn.style.background = 'var(--danger)';
+  }
+}
+initFFmpeg();
+
+// ── UI 事件綁定 ──
+function formatSize(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024, sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+}
+
+document.querySelectorAll('.mode-card').forEach(card => {
+  card.addEventListener('click', () => {
+    document.querySelectorAll('.mode-card').forEach(c => c.classList.remove('active'));
+    card.classList.add('active');
+    state.mode = card.dataset.mode;
+  });
+});
+
+DOM.dropZone.addEventListener('dragover', e => { e.preventDefault(); DOM.dropZone.classList.add('drag-over'); });
+DOM.dropZone.addEventListener('dragleave', () => DOM.dropZone.classList.remove('drag-over'));
+DOM.dropZone.addEventListener('drop', e => { e.preventDefault(); DOM.dropZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+DOM.fileInput.addEventListener('change', () => { handleFiles(DOM.fileInput.files); DOM.fileInput.value = ''; });
+DOM.dropZone.addEventListener('click', e => { if (e.target !== DOM.triggerFile) DOM.fileInput.click(); });
+DOM.triggerFile.addEventListener('click', e => { e.stopPropagation(); DOM.fileInput.click(); });
+
+function createQueueItemNode(entry) {
+  const el = document.createElement('div');
+  el.className = 'queue-item';
+  el.id = `qi-${entry.id}`;
+  const ext = (entry.file.name.split('.').pop() || 'VIDEO').toUpperCase();
+  
+  el.innerHTML = `
+    <div class="file-icon">🎬</div>
+    <div class="file-info">
+      <div class="file-name" id="fname-${entry.id}"></div>
+      <div class="file-meta"><span>${formatSize(entry.file.size)}</span><span>${ext}</span><span id="qmeta-${entry.id}"></span></div>
+      <div class="progress-bar-wrap"><div class="progress-bar" id="qbar-${entry.id}"></div></div>
+      <div id="qaction-${entry.id}"></div>
+    </div>
+    <span class="status-badge waiting" id="qstat-${entry.id}">等待中</span>
+    <button class="remove-btn" data-id="${entry.id}">✕</button>
+  `;
+  return el;
+}
+
+function handleFiles(fileList) {
+  const validFiles = Array.from(fileList).filter(f => f.type.startsWith('video/'));
+  validFiles.forEach(f => {
+    const id = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
+    const entry = { id, file: f, status: 'waiting', origSize: f.size, objectUrl: null };
+    state.files.set(id, entry);
+    DOM.queue.appendChild(createQueueItemNode(entry));
+    document.getElementById(`fname-${id}`).textContent = f.name; 
+  });
+  updateStartBtn();
+}
+
+DOM.queue.addEventListener('click', e => {
+  const btn = e.target.closest('.remove-btn');
+  if (btn) removeFile(btn.dataset.id);
+});
+
+function removeFile(id) {
+  const entry = state.files.get(id);
+  if (entry && entry.objectUrl) URL.revokeObjectURL(entry.objectUrl); 
+  state.files.delete(id);
+  document.getElementById(`qi-${id}`)?.remove();
+  updateStartBtn();
+}
+
+function updateStartBtn() {
+  if (!state.ffmpegReady) return; // 錯誤狀態或未載入完成不更動
+  const hasWaiting = Array.from(state.files.values()).some(f => f.status === 'waiting');
+  DOM.startBtn.disabled = !hasWaiting || state.processing;
+  DOM.startBtn.textContent = state.processing ? '壓縮處理中...' : '開始壓縮';
+}
+
+function renderStats() {
+  DOM.statsFiles.textContent = state.stats.processed;
+  DOM.statsSize.textContent = formatSize(state.stats.totalSaved);
+  DOM.statsSaved.textContent = state.stats.totalOrig > 0 ? 
+    Math.round((state.stats.totalSaved / state.stats.totalOrig) * 100) + '%' : '0%';
+}
+
+// ── 真實 FFmpeg 壓縮邏輯 ──
+async function compressFile(entry) {
+  const statEl = document.getElementById(`qstat-${entry.id}`);
+  const barEl = document.getElementById(`qbar-${entry.id}`);
+  const metaEl = document.getElementById(`qmeta-${entry.id}`);
+  const actionEl = document.getElementById(`qaction-${entry.id}`);
+
+  statEl.className = 'status-badge processing';
+  statEl.textContent = '轉檔中';
+  entry.status = 'processing';
+
+  const inName = `in_${entry.id}`;
+  const outName = `out_${entry.id}.mp4`;
+
+  try {
+    await state.ffmpeg.writeFile(inName, await fetchFile(entry.file));
+
+    state.ffmpeg.on('progress', ({ progress }) => {
+      const pct = Math.max(0, Math.min(100, Math.round(progress * 100)));
+      barEl.style.width = `${pct}%`;
+      metaEl.textContent = `處理進度 ${pct}%`;
+    });
+
+    // 🏆 重點優化：確保 100% 複製 Metadata 與相機資訊的指令
+    await state.ffmpeg.exec([
+      '-i', inName,
+      '-c:v', 'libx264',
+      '-crf', state.mode,
+      '-preset', 'ultrafast',
+      '-c:a', 'copy',
+      '-map_metadata', '0',
+      '-map_metadata:s:v', '0:s:v',
+      '-map_metadata:s:a', '0:s:a',
+      '-movflags', 'use_metadata_tags',
+      outName
+    ]);
+
+    const data = await state.ffmpeg.readFile(outName);
+    const outSize = data.buffer.byteLength;
+    
+    entry.status = 'done';
+    state.stats.processed++;
+    state.stats.totalSaved += Math.max(0, entry.origSize - outSize);
+    state.stats.totalOrig += entry.origSize;
+    renderStats();
+
+    statEl.className = 'status-badge done';
+    statEl.textContent = '完成';
+    barEl.style.background = 'var(--accent3)';
+    barEl.style.width = '100%';
+    metaEl.textContent = `壓縮後: ${formatSize(outSize)}`;
+
+    // 🏆 繼承原始檔案的時間戳記
+    const dlName = entry.file.name.replace(/(\.[^.]+)$/, '_slim.mp4');
+    const finalFile = new File([data.buffer], dlName, {
+      type: 'video/mp4',
+      lastModified: entry.file.lastModified 
+    });
+    
+    entry.objectUrl = URL.createObjectURL(finalFile);
+    
+    const a = document.createElement('a');
+    a.href = entry.objectUrl;
+    a.download = dlName;
+    a.className = 'dl-btn';
+    a.textContent = '⬇ 儲存影片 (包含 Metadata)';
+    actionEl.appendChild(a);
+
+    await state.ffmpeg.deleteFile(inName);
+    await state.ffmpeg.deleteFile(outName);
+
+  } catch (error) {
+    console.error("處理錯誤", error);
+    statEl.className = 'status-badge error';
+    statEl.textContent = '失敗';
+    barEl.style.background = 'var(--danger)';
+    metaEl.textContent = '轉檔過程發生錯誤';
+    entry.status = 'error';
+  }
+}
+
+DOM.startBtn.addEventListener('click', async () => {
+  const waiting = Array.from(state.files.values()).filter(f => f.status === 'waiting');
+  if (!waiting.length || !state.ffmpegReady) return;
+
+  state.processing = true;
+  updateStartBtn();
+
+  for (const entry of waiting) {
+    if (state.files.has(entry.id)) { 
+      await compressFile(entry);
+    }
+  }
+
+  state.processing = false;
+  updateStartBtn();
+});
+</script>
+</body>
+</html>
